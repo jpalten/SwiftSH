@@ -107,7 +107,7 @@ open class SSHSession<T: RawLibrary> {
         self.queue.async(completion: completion) { [weak self] in
             defer {
 
-                if self?.connected == true {
+                if self?.connected == false {
                     self?.disconnect()
                 }
             }
