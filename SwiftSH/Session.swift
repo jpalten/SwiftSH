@@ -106,7 +106,7 @@ open class SSHSession<T: RawLibrary> {
     public func connect(_ completion: SSHCompletionBlock?) {
         self.queue.async(completion: completion) {
             defer {
-                if !self.connected {
+                if self.connected {
                     self.disconnect()
                 }
             }
