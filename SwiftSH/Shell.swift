@@ -158,7 +158,7 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
 
         // Call the callbacks
         if let callback = readStringCallback {
-            queue.callbackQueue.async { [weak self] in
+            queue.callbackQueue.async {
                 var responseString: String?
                 if let data = response {
                     responseString = String(data: data, encoding: .utf8)
@@ -173,7 +173,7 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
             }
         }
         if let callback = readDataCallback {
-            queue.callbackQueue.async { [weak self] in
+            queue.callbackQueue.async {
                 callback(response, error)
             }
         }

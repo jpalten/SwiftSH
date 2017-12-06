@@ -152,7 +152,7 @@ open class SSHSession<T: RawLibrary> {
             }
             
             // Get the host's fingerprint
-            self?.log.debug("Fingerprint is \(try! self?.fingerprint())")
+            self?.log.debug("Fingerprint is \(try! self?.fingerprint() ?? "")")
         }
     }
 
