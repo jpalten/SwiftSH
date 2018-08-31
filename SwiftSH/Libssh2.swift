@@ -200,7 +200,7 @@ extension Libssh2 {
             }
 
             // Create session instance
-            self.session = libssh2_session_init_ex(nil, nil, nil, UnsafeMutableRawPointer(mutating: _bridge(self)))
+            self.session = libssh2_session_init_ex(nil, nil, nil, UnsafeMutableRawPointer(mutating: Unmanaged.passUnretained(self).toOpaque()))
             guard self.session != nil else {
                 return nil
             }
@@ -270,11 +270,11 @@ extension Libssh2 {
             }
         }
 
-        func fingerprint(_ hash: Fingerprint) -> String {
+        func fingerprint(_ hashType: FingerprintHashType) -> String? {
             let type: Int32
             let length: Int
 
-            switch hash {
+            switch hashType {
                 case .md5:
                     type = LIBSSH2_HOSTKEY_HASH_MD5
                     length = 16
@@ -283,13 +283,13 @@ extension Libssh2 {
                     length = 20
             }
 
-            var fingerprint = Array<String>(repeating: "", count: length)
-            let hash = UnsafeRawPointer(libssh2_hostkey_hash(self.session, type)).assumingMemoryBound(to: UInt8.self)
-            for i in 0..<fingerprint.count {
-                fingerprint[i] = String(hash[i], radix: 16, uppercase: true)
+            guard let hashPointer = libssh2_hostkey_hash(self.session, type) else {
+                return nil
             }
-
-            return fingerprint.joined(separator: ":")
+            
+            let hash = UnsafeRawPointer(hashPointer).assumingMemoryBound(to: UInt8.self)
+            
+            return (0..<length).map({ String(hash[$0], radix: 16, uppercase: true) }).joined(separator: ":")
         }
 
         func authenticationList(_ username: String) throws -> [String] {
@@ -319,7 +319,13 @@ extension Libssh2 {
             try libssh2_function {
                 libssh2_userauth_keyboard_interactive_ex(self.session, username, UInt32(username.utf8.count), { (name, nameLength, instruction, instructionLength, numberOfPrompts, prompts, responses, abstract) in
                     for i in 0..<Int(numberOfPrompts) {
-                        guard let prompt = NSString(bytes: prompts![i].text, length: Int(prompts![i].length), encoding: String.Encoding.utf8.rawValue) else {
+                        guard let prompt = prompts?[i], let text = prompt.text else {
+                            continue
+                        }
+                        
+                        let data = Data(bytes: UnsafeRawPointer(text), count: Int(prompt.length))
+                        
+                        guard let challenge = String(data: data, encoding: .utf8) else {
                             continue
                         }
                         
@@ -329,18 +335,34 @@ extension Libssh2 {
                             return
                         }
 
-                        let password = NSString(string: keyboardInteractiveCallback(prompt as String)).utf8String
-                        let response = LIBSSH2_USERAUTH_KBDINT_RESPONSE(text: strdup(password), length: UInt32(strlen(password)))
+                        let password = keyboardInteractiveCallback(challenge)
+                        let response = password.withCString {
+                             LIBSSH2_USERAUTH_KBDINT_RESPONSE(text: strdup($0), length: UInt32(strlen(password)))
+                        }
                         
                         responses?[i] = response
                     }
-                });
+                })
             }
         }
 
-        func authenticateByPublicKey(_ username: String, password: String, publicKey: String, privateKey: String) throws {
+        func authenticateByPublicKeyFromFile(_ username: String, password: String, publicKey: String?, privateKey: String) throws {
             try libssh2_function {
                 libssh2_userauth_publickey_fromfile_ex(self.session, username, UInt32(username.utf8.count), publicKey, privateKey, password)
+            }
+        }
+        
+        func authenticateByPublicKeyFromMemory(_ username: String, password: String, publicKey: Data?, privateKey: Data) throws {
+            try libssh2_function {
+                privateKey.withUnsafeBytes { (privateKeyPointer: UnsafePointer<Int8>) -> Int32 in
+                    if let publicKey = publicKey {
+                        return publicKey.withUnsafeBytes { publicKeyPointer in
+                            libssh2_userauth_publickey_frommemory(self.session, username, username.utf8.count, publicKeyPointer, publicKey.count, privateKeyPointer, privateKey.count, password)
+                        }
+                    } else {
+                        return libssh2_userauth_publickey_frommemory(self.session, username, username.utf8.count, nil, 0, privateKeyPointer, privateKey.count, password)
+                    }
+                }
             }
         }
 
@@ -360,7 +382,7 @@ extension Libssh2 {
 
         var session: OpaquePointer
         var channel: OpaquePointer?
-        var bufferSize: Int = 0x8000
+        var bufferSize: Int = 32_768
 
         var opened: Bool {
             return self.channel != nil
@@ -385,14 +407,14 @@ extension Libssh2 {
 
         func openChannel() throws {
             let channelType = "session"
-            self.channel = try libssh2_function(self.session) {
-                libssh2_channel_open_ex(self.session, channelType, UInt32(channelType.utf8.count), 2 * 1024 * 1024, UInt32(LIBSSH2_CHANNEL_PACKET_DEFAULT), nil, 0)
+            self.channel = try libssh2_function(self.session) { session in
+                libssh2_channel_open_ex(session, channelType, UInt32(channelType.utf8.count), 2 * 1024 * 1024, UInt32(LIBSSH2_CHANNEL_PACKET_DEFAULT), nil, 0)
             }
         }
         
         func openSCPChannel(remotePath path: String) throws {
             var fileInfo = libssh2_struct_stat()
-            self.channel = try libssh2_function(self.session) {
+            self.channel = try libssh2_function(self.session) { session in
                 libssh2_scp_recv2(self.session, path, &fileInfo)
             }
         }
@@ -484,10 +506,10 @@ extension Libssh2 {
             let bufferSize = self.bufferSize
             let buffer = UnsafeMutablePointer<Int8>.allocate(capacity: bufferSize)
             defer {
-                buffer.deallocate(capacity: bufferSize)
+                buffer.deallocate()
             }
 
-            let data = NSMutableData()
+            var data = Data()
 
             var returnCode: Int
             repeat {
@@ -498,11 +520,13 @@ extension Libssh2 {
                 }
 
                 if returnCode > 0 {
-                    data.append(buffer, length: returnCode)
+                    buffer.withMemoryRebound(to: UInt8.self, capacity: returnCode) {
+                        data.append(UnsafePointer($0), count: returnCode)
+                    }
                 }
             } while returnCode > 0 || (returnCode == 0 && libssh2_channel_eof(channel) == 0)
 
-            return data as Data
+            return data
         }
 
         func write(_ data: Data) -> (error: Error?, bytesSent: Int) {
@@ -510,18 +534,12 @@ extension Libssh2 {
                 return (error: SSHError.Channel.invalid, bytesSent: 0)
             }
 
-            let bufferSize = self.bufferSize
-            let buffer = UnsafeMutablePointer<Int8>.allocate(capacity: bufferSize)
-            defer {
-                buffer.deallocate(capacity: bufferSize)
-            }
-
             var bytesSent = 0
-            var returnCode: Int
             repeat {
-                let length = min(data.count, bufferSize)
-                (data as NSData).getBytes(buffer, range: NSMakeRange(bytesSent, length))
-                returnCode = libssh2_channel_write_ex(channel, 0, buffer, length)
+                let length = min(data.count - bytesSent, self.bufferSize)
+                let returnCode = data.withUnsafeBytes { buffer in
+                    libssh2_channel_write_ex(channel, 0, buffer + bytesSent, length)
+                }
 
                 guard returnCode >= 0 || returnCode == Int(LIBSSH2_ERROR_EAGAIN) else {
                     return (error: returnCode.error, bytesSent: bytesSent)
@@ -568,10 +586,10 @@ private func libssh2_success(_ function: () -> Int32) -> Bool {
     return returnCode == 0
 }
 
-private func libssh2_function<T: BinaryInteger>(_ function: () -> T) throws {
+private func libssh2_function(_ function: () -> Int32) throws {
     var returnCode: Int32
     repeat {
-        returnCode = Int32(Int64(function()))
+        returnCode = function()
     } while returnCode == LIBSSH2_ERROR_EAGAIN
 
     guard returnCode == 0 else {
@@ -579,11 +597,11 @@ private func libssh2_function<T: BinaryInteger>(_ function: () -> T) throws {
     }
 }
 
-private func libssh2_function<T>(_ session: OpaquePointer, function: () -> T?) throws -> T {
+private func libssh2_function<T>(_ session: OpaquePointer, function: (OpaquePointer) -> T?) throws -> T {
     var result: T?
     var returnCode: Int32
     repeat {
-        result = function()
+        result = function(session)
         returnCode = libssh2_session_last_errno(session)
     } while returnCode == LIBSSH2_ERROR_EAGAIN
 

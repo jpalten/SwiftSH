@@ -34,10 +34,19 @@ public protocol RawLibrary {
     
 }
 
-// MARK: - Fingerprint enum
+// MARK: - FingerprintHashType enum
 
-public enum Fingerprint {
+public enum FingerprintHashType: CustomStringConvertible {
+    
     case md5, sha1
+    
+    public var description: String {
+        switch self {
+        case .md5:  return "MD5"
+        case .sha1: return "SHA1"
+        }
+    }
+    
 }
 
 // MARK: - AuthenticationMethod enum
@@ -67,29 +76,19 @@ public enum AuthenticationMethod: CustomStringConvertible, Equatable {
 
 }
 
-public func ==(lhs: AuthenticationMethod, rhs: AuthenticationMethod) -> Bool {
-    switch (lhs, rhs) {
-        case (.password, .password): return true
-        case (.keyboardInteractive, .keyboardInteractive): return true
-        case (.publicKey, .publicKey): return true
-        case (.unknown(let lhs), .unknown(let rhs)): return lhs == rhs
-        default: return false
-    }
-}
-
 // MARK: - AuthenticationChallenge enum
 
 public enum AuthenticationChallenge {
 
     case byPassword(username: String, password: String)
     case byKeyboardInteractive(username: String, callback: ((String) -> String))
-    case byPublicKey(username: String, password: String, publicKey: String, privateKey: String)
+    case byPublicKeyFromFile(username: String, password: String, publicKey: String?, privateKey: String)
+    case byPublicKeyFromMemory(username: String, password: String, publicKey: Data?, privateKey: Data)
 
     var username: String {
         switch self {
-            case .byPassword(let username, _): return username
-            case .byKeyboardInteractive(let username, _): return username
-            case .byPublicKey(let username, _, _, _): return username
+            case .byPassword(let username, _), .byKeyboardInteractive(let username, _), .byPublicKeyFromFile(let username, _, _, _), .byPublicKeyFromMemory(let username, _, _, _):
+                return username
         }
     }
 
@@ -97,13 +96,13 @@ public enum AuthenticationChallenge {
         switch self {
             case .byPassword: return .password
             case .byKeyboardInteractive: return .keyboardInteractive
-            case .byPublicKey: return .publicKey
+            case .byPublicKeyFromFile, .byPublicKeyFromMemory: return .publicKey
         }
     }
 
 }
 
-// MARK: - RawSession Protocol
+// MARK: - RawSession protocol
 
 public protocol RawSession {
 
@@ -114,11 +113,12 @@ public protocol RawSession {
 
     func setBanner(_ banner: String) throws
     func handshake(_ socket: CFSocket) throws
-    func fingerprint(_ hash: Fingerprint) -> String
+    func fingerprint(_ hashType: FingerprintHashType) -> String?
     func authenticationList(_ username: String) throws -> [String]
     func authenticateByPassword(_ username: String, password: String) throws
     func authenticateByKeyboardInteractive(_ username: String, callback: @escaping ((String) -> String)) throws
-    func authenticateByPublicKey(_ username: String, password: String, publicKey: String, privateKey: String) throws
+    func authenticateByPublicKeyFromFile(_ username: String, password: String, publicKey: String?, privateKey: String) throws
+    func authenticateByPublicKeyFromMemory(_ username: String, password: String, publicKey: Data?, privateKey: Data) throws
     func disconnect() throws
     
 }
