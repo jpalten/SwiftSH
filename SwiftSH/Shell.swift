@@ -81,12 +81,6 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
             try super.open()
             
             self.log.debug("Opening the shell...")
-            
-            // Set blocking mode
-            self.session.blocking = true
-            
-            // Open a shell
-            try self.channel.shell()
 
             // Read the received data
             self.readSource = DispatchSource.makeReadSource(fileDescriptor: CFSocketGetNative(self.socket), queue: self.queue.queue)
@@ -107,8 +101,8 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
                 // Read the response
                 var response: Data?
                 do {
-                    response = try strongSelf.channel.read() as Data
-                    strongSelf.log.debug("Read \((response ?? Data()).count) bytes")
+                    response = try strongSelf.channel.read()
+                    strongSelf.log.debug("Read \(response?.count ?? 0) bytes")
                 } catch let error {
                     strongSelf.log.error("[STD] \(error)")
                 }
@@ -120,7 +114,7 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
                     if data.count > 0 {
                         error = data
                     }
-                } catch let error{
+                } catch let error {
                     strongSelf.log.error("[ERR] \(error)")
                 }
 
@@ -140,19 +134,24 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
                         callback(responseString, errorString)
                     }
                 }
-                if let callback = strongSelf.readDataCallback {
+                if let callback = strongSelf.readDataCallback, response != nil || error != nil {
                     strongSelf.queue.callbackQueue.async {
                         callback(response, error)
                     }
                 }
 
                 // Check if the host has closed the channel
-                if strongSelf.channel.receivedEOF {
-                    strongSelf.log.info("Received EOF")
+                let receivedEOF = strongSelf.channel.receivedEOF
+                let socketClosed = (response == nil && error == nil)
+                if receivedEOF || socketClosed {
+                    if receivedEOF {
+                        strongSelf.log.info("Received EOF")
+                    } else if socketClosed {
+                        strongSelf.log.info("Socket has been closed without EOF")
+                    }
                     strongSelf.close()
                 }
             }
-            readSource.resume()
 
             // Write the input data
             self.writeSource = DispatchSource.makeWriteSource(fileDescriptor: CFSocketGetNative(self.socket), queue: self.queue.queue)
@@ -210,6 +209,18 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
                 }
             }
             
+            // Set blocking mode
+            self.session.blocking = true
+            
+            // Open a shell
+            try self.channel.shell()
+            
+            // Set non-blocking mode
+            self.session.blocking = false
+            
+            // Start listening for new data
+            readSource.resume()
+            
             self.log.debug("Shell opened successfully")
         }
     }
@@ -227,6 +238,8 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
     }
 
     internal override func close() {
+        assert(self.queue.current)
+        
         self.log.debug("Closing the shell...")
         
         // Cancel the socket sources

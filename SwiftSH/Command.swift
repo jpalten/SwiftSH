@@ -78,12 +78,6 @@ public class SSHCommand<T: RawLibrary>: SSHChannel<T> {
             // Open the channel
             try self.open()
 
-            // Set blocking mode
-            self.session.blocking = true
-
-            // Execute the command
-            try self.channel.exec(command)
-
             // Read the received data
             self.socketSource = DispatchSource.makeReadSource(fileDescriptor: CFSocketGetNative(self.socket), queue: self.queue.queue)
             guard let socketSource = self.socketSource else {
@@ -105,6 +99,7 @@ public class SSHCommand<T: RawLibrary>: SSHChannel<T> {
                 strongSelf.session.blocking = false
 
                 // Read the result
+                var socketClosed = true
                 do {
                     let data = try strongSelf.channel.read()
                     if strongSelf.response == nil {
@@ -112,6 +107,8 @@ public class SSHCommand<T: RawLibrary>: SSHChannel<T> {
                     }
 
                     strongSelf.response!.append(data)
+                    
+                    socketClosed = false
                 } catch let error {
                     strongSelf.log.error("[STD] \(error)")
                 }
@@ -126,12 +123,14 @@ public class SSHCommand<T: RawLibrary>: SSHChannel<T> {
 
                         strongSelf.error!.append(data)
                     }
+                    
+                    socketClosed = false
                 } catch let error {
                     strongSelf.log.error("[ERR] \(error)")
                 }
 
                 // Check if we can return the response
-                if strongSelf.channel.receivedEOF || strongSelf.channel.exitStatus() != nil {
+                if strongSelf.channel.receivedEOF || strongSelf.channel.exitStatus() != nil || socketClosed {
                     defer {
                         strongSelf.cancelSources()
                     }
@@ -175,7 +174,17 @@ public class SSHCommand<T: RawLibrary>: SSHChannel<T> {
                 }
             }
             timeoutSource.schedule(deadline: .now() + self.timeout, repeating: self.timeout, leeway: .seconds(10))
-
+            
+            // Set blocking mode
+            self.session.blocking = true
+            
+            // Execute the command
+            try self.channel.exec(command)
+            
+            // Set non-blocking mode
+            self.session.blocking = false
+            
+            // Start listening for new data
             timeoutSource.resume()
             socketSource.resume()
         })
