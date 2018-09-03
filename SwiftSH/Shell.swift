@@ -282,6 +282,12 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
             if let writeSource = self.writeSource, !self.messageQueue.isEmpty, !self.writing {
                 self.writing = true
                 writeSource.resume()
+            } else {
+
+                self.log.debug("SwiftSH.Shell Invalid Write Source for SSH Shell?")
+                self.log.debug("writeSource \( self.writeSource == nil ? "nil" : "not nil")")
+                self.log.debug("messageQueue items \( self.messageQueue.count)")
+                self.log.debug("self.writing \( self.writing)")
             }
         }
     }
