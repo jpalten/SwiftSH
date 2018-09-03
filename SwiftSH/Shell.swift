@@ -195,6 +195,8 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
 
                 // If the message queue is empty suspend the source
                 if let writeSource = strongSelf.writeSource, strongSelf.messageQueue.isEmpty {
+
+                    strongSelf.log.debug("Suspending writeSource; writing = false now")
                     writeSource.suspend()
                     strongSelf.writing = false
                 }
@@ -205,6 +207,7 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
                 }
 
                 if !strongSelf.writing {
+                    self?.log.debug("Resumeing writeSource")
                     writeSource.resume()
                 }
             }
@@ -280,6 +283,7 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
 
             // Start the write source if necessary
             if let writeSource = self.writeSource, !self.messageQueue.isEmpty, !self.writing {
+                self.log.debug("Resuming writeSource; writing = true now")
                 self.writing = true
                 writeSource.resume()
             } else {
