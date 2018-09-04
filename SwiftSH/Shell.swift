@@ -159,6 +159,7 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
                 throw SSHError.allocation
             }
 
+            self.log.debug("adding socket write event handler")
             writeSource.setEventHandler { [weak self] in
                 guard let strongSelf = self else {
                     return
@@ -284,6 +285,7 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
             // Start the write source if necessary
             if let writeSource = self.writeSource, !self.messageQueue.isEmpty, !self.writing {
                 self.log.debug("Resuming writeSource; writing = true now")
+                self.log.debug("messageQueue items \( self.messageQueue.count)")
                 self.writing = true
                 writeSource.resume()
             } else {
