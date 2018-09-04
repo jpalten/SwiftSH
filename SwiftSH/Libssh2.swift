@@ -298,6 +298,7 @@ extension Libssh2 {
             
             guard let authenticationList = libssh2_userauth_list(self.session, username, UInt32(username.utf8.count)), let authenticationString = String(validatingUTF8: authenticationList) else {
                 if self.authenticated {
+                    print("DEBUG: Libssh2: already authenticated")
                     return []
                 } else {
                     throw self.lastError
