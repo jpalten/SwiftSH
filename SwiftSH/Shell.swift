@@ -264,8 +264,10 @@ public class SSHShell<T: RawLibrary>: SSHChannel<T> {
             self.log.error("\(error)")
         }
 
+        self.log.debug("Closing the channel")
         // Close the channel
         super.close()
+        self.log.debug("Channel closed")
     }
 
     // MARK: - Write
