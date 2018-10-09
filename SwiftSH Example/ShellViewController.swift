@@ -94,7 +94,11 @@ class ShellViewController: UIViewController, SSHViewController {
                     }
                 }
             }
-            .connect()
+            .connect { error in
+                print("error? \(error)")
+            }
+
+        self.shell
             .authenticate(self.authenticationChallenge)
             .open { [unowned self] (error) in
                 if let error = error {
