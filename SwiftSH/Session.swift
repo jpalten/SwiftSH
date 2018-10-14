@@ -105,7 +105,13 @@ open class SSHSession<T: RawLibrary> {
     }
 
     public func connect(_ completion: SSHCompletionBlock?) {
-        self.queue.async(completion: completion) {
+        self.queue.async(completion: completion) { [weak self] in
+
+            try self?.doConnect(completion)
+        }
+    }
+
+    private func doConnect(_ completion: SSHCompletionBlock?) throws {
             defer {
                 if !self.connected {
                     self.disconnect()
@@ -219,15 +225,15 @@ open class SSHSession<T: RawLibrary> {
                 self.fingerprint[hashType] = self.session.fingerprint(hashType)
             }
             self.log.debug("Fingerprint is \(self.fingerprint)")
-        }
+
     }
 
     public func disconnect(_ completion: (() -> ())?) {
-        self.queue.async {
-            self.disconnect()
+        self.queue.async { [weak self] in
+            self?.disconnect()
 
             if let completion = completion {
-                self.queue.callbackQueue.async {
+                self?.queue.callbackQueue.async {
                     completion()
                 }
             }
@@ -282,7 +288,13 @@ open class SSHSession<T: RawLibrary> {
     }
 
     public func authenticate(_ challenge: AuthenticationChallenge?, completion: SSHCompletionBlock?) {
-        self.queue.async(completion: completion) {
+        self.queue.async(completion: completion) { [weak self] in
+            try self?.doAuthenticate(challenge, completion:completion)
+        }
+    }
+
+    private func doAuthenticate(_ challenge: AuthenticationChallenge?, completion: SSHCompletionBlock?) throws {
+
             guard let challenge = challenge, !self.authenticated else {
                 return
             }
@@ -323,11 +335,18 @@ open class SSHSession<T: RawLibrary> {
                     // Public Key authentication
                     try self.session.authenticateByPublicKeyFromMemory(username, password: password, publicKey: publicKey, privateKey: privateKey)
             }
-        }
     }
     
     public func checkFingerprint(_ callback: @escaping ([FingerprintHashType: String]) -> Bool) -> Self {
-        self.queue.async {
+        self.queue.async { [weak self] in
+
+            self?.doCheckFingerprint(callback)
+        }
+        return self
+    }
+
+    private func doCheckFingerprint(_ callback: @escaping ([FingerprintHashType: String]) -> Bool) {
+
             guard self.connected else {
                 return
             }
@@ -343,9 +362,6 @@ open class SSHSession<T: RawLibrary> {
             if disconnect {
                 self.disconnect()
             }
-        }
-
-        return self
     }
 
     public func checkFingerprint(_ validFingerprints: String...) -> Self {
